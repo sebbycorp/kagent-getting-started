@@ -1,14 +1,16 @@
-# kagent v1.0.0-rc2 on kind + DGX Spark
+# kagent v1.0.0-rc3 on kind + DGX Spark
 
 A deployment guide that covers:
 
 1. A local **kind** cluster with LoadBalancer support from `sudo cloud-provider-kind`
-2. **kagent v1.0.0-rc2** (with Agent Substrate and the bundled dev PostgreSQL)
+2. **kagent v1.0.0-rc3** (with Agent Substrate v1.0.0 and the bundled dev PostgreSQL)
 3. A **DGX Spark** running vLLM (`qwen3.8-flash-next`) as the default model provider
 4. **Agent #1: `agentgateway-tracker`**: a daily summary of changes on the agentgateway GitHub repos and agentgateway.dev, published to this repo
 5. **Agent #2: `fortinet-cve-watch`**: a daily check of the latest Fortinet CVEs against your FortiGate's firmware, published to this repo
 
-> Verified against the `v1.0.0-rc2` charts, CRDs (`api.kagent.dev/v1alpha3`), and CLI on 2026-11-06.
+> Written against the `v1.0.0-rc3` charts, CRDs (`api.kagent.dev/v1alpha3`), and CLI (2026-11-06).
+> The kagent CRDs are unchanged from rc2. rc3 moves Substrate to **v1.0.0** and installs
+> atelet as its own `substrate-atelet` release. Upgrading an rc2 cluster? See [step 12](#12-upgrading-from-rc2).
 > kagent 1.0 differs a lot from 0.x. Agents now run as **Substrate actors** inside gVisor
 > sandboxes, they reach the network only through egress policies, and every Agent needs a
 > **Harness**. Examples written for 0.x (`kagent.dev/v1alpha2`, `spec.declarative`, `MCPServer`) do not work here.
@@ -51,10 +53,10 @@ DGX Spark's IP behind a selectorless Service and points the ModelConfig at
 | kind | **≥ v0.31** (needs `kindest/node:v1.35.0`) | `brew upgrade kind` |
 | kubectl, helm, jq | recent | `brew install kubectl helm jq` |
 | cloud-provider-kind | recent | `brew install cloud-provider-kind` |
-| kagent CLI | **v1.0.0-rc2** | see step 3 |
+| kagent CLI | **v1.0.0-rc3** | see step 3 |
 
 > `kind version` currently reports **v0.30.0** on this machine. Upgrade it first. kagent
-> rc2 uses Kubernetes 1.35 feature gates (`PodCertificateRequest`, `ClusterTrustBundle*`)
+> rc3 uses Kubernetes 1.35 feature gates (`PodCertificateRequest`, `ClusterTrustBundle*`)
 > that Substrate needs.
 
 ### 0.1 Check the DGX Spark
@@ -139,12 +141,12 @@ sudo cloud-provider-kind --enable-lb-port-mapping
 On macOS the Docker network isn't routable from the host. `--enable-lb-port-mapping` publishes
 each LB port on `localhost` through a `kindccm-*` container (see step 5).
 
-## 3. Install the kagent CLI (v1.0.0-rc2)
+## 3. Install the kagent CLI (v1.0.0-rc3)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kagent-dev/kagent/v1.0.0-rc2/scripts/get-kagent \
-  | DESIRED_VERSION=v1.0.0-rc2 bash
-kagent version     # → "kagent_version":"1.0.0-rc2"
+curl -fsSL https://raw.githubusercontent.com/kagent-dev/kagent/v1.0.0-rc3/scripts/get-kagent \
+  | DESIRED_VERSION=v1.0.0-rc3 bash
+kagent version     # → "kagent_version":"1.0.0-rc3"
 ```
 
 ## 4. Point kagent at the DGX Spark and install
@@ -191,8 +193,10 @@ kubectl -n kagent run dgx-test --rm -i --restart=Never --image=curlimages/curl -
 ### 4.2 Install config and values
 
 `kagent install` is the supported path for a dev cluster. It installs, in order:
-`kagent-crds` → `substrate-crds` → `substrate-podcert` → `substrate` → `kagent`. It also
-deploys a dev PostgreSQL, creates the Substrate CAs and identities, and labels the namespace
+`kagent-crds` → `substrate-crds` → `substrate-podcert` → `substrate-atelet` → `substrate` → `kagent`.
+It also deploys a dev PostgreSQL, creates the Substrate CAs and identities, creates the
+`kagent-rustfs-credentials` Secret that atelet reads, enables the Substrate preview gates
+kagent needs (`PerTemplateSnapshotLocation`, `GoldenEgressPolicy`), and labels the namespace
 `ate.dev/api-access=true`.
 
 ```bash
@@ -218,7 +222,7 @@ cat > install/config.yaml <<EOF
 install:
   defaultModelProvider: OpenAI
   kagent:
-    version: 1.0.0-rc2
+    version: 1.0.0-rc3
     valuesFiles:
       - $PWD/install/kagent-values.yaml
 EOF
@@ -470,7 +474,7 @@ spec:
                   apk add --no-cache curl jq >/dev/null
                   ARCH=$(uname -m); [ "$ARCH" = aarch64 ] && ARCH=arm64; [ "$ARCH" = x86_64 ] && ARCH=amd64
                   curl -fsSL -o /usr/local/bin/kagent \
-                    https://github.com/kagent-dev/kagent/releases/download/v1.0.0-rc2/kagent-linux-$ARCH
+                    https://github.com/kagent-dev/kagent/releases/download/v1.0.0-rc3/kagent-linux-$ARCH
                   chmod +x /usr/local/bin/kagent
                   K="kagent --api-url $KAGENT_URL --gateway-url $KAGENT_URL -n kagent"
                   FROM=$(date -u -d @$(( $(date +%s) - 86400 )) +%Y-%m-%dT%H:%M:%SZ)
@@ -622,7 +626,7 @@ spec:
                   apk add --no-cache curl jq >/dev/null
                   ARCH=$(uname -m); [ "$ARCH" = aarch64 ] && ARCH=arm64; [ "$ARCH" = x86_64 ] && ARCH=amd64
                   curl -fsSL -o /usr/local/bin/kagent \
-                    https://github.com/kagent-dev/kagent/releases/download/v1.0.0-rc2/kagent-linux-$ARCH
+                    https://github.com/kagent-dev/kagent/releases/download/v1.0.0-rc3/kagent-linux-$ARCH
                   chmod +x /usr/local/bin/kagent
 
                   # 1) FortiGate firmware (self-signed cert -> -k)
@@ -682,7 +686,7 @@ secrets in it. The guide keeps all secrets in Kubernetes Secrets only.
 
 | Symptom | Check |
 |---|---|
-| Agent never becomes `Ready` | `kubectl describe agent <name> -n kagent`; `kubectl get pods -n ate-system`; `kubectl logs -n kagent -l app.kubernetes.io/component=controller` |
+| Agent never becomes `Ready` | `kubectl describe agent <name> -n kagent`; `kubectl get pods -n ate-system`; `kubectl rollout status daemonset/atelet -n ate-system`; `helm list -n ate-system` (expect `substrate-atelet`); `kubectl logs -n kagent -l app.kubernetes.io/component=controller` |
 | Model calls fail / time out | `kubectl -n kagent run t --rm -i --restart=Never --image=curlimages/curl -- curl -s http://dgx-spark.kagent.svc.cluster.local:8000/v1/models`; confirm the EndpointSlice IP; raise `providers.openAI.config.timeout` |
 | Agent replies but never calls tools | vLLM is missing `--enable-auto-tool-choice --tool-call-parser …` (see 0.1) |
 | GitHub tool errors (401/403) | PAT scope or expiry; secret value must be `Bearer <token>`; `kubectl describe remotemcpserver github -n kagent` |
@@ -690,7 +694,7 @@ secrets in it. The guide keeps all secrets in Kubernetes Secrets only.
 | CronJob can't reach the FortiGate | Trusted Hosts on the API admin must include the Mac's LAN IP |
 | `kind create` fails on node image | Upgrade kind to ≥ v0.31 for `kindest/node:v1.35.0` |
 | No EXTERNAL-IP on `kagent-ui` | Is `sudo cloud-provider-kind` still running in terminal 2? |
-| Python-runtime agents crash with `Illegal instruction` | Use the `kagent` (Go ADK) harness as shown; rc2's built-in harness image is Go |
+| Python-runtime agents crash with `Illegal instruction` | Use the `kagent` (Go ADK) harness as shown; rc3's built-in harness image is Go |
 
 Useful views:
 
@@ -709,12 +713,34 @@ kind delete cluster --name kagent
 # stop cloud-provider-kind with Ctrl-C in terminal 2
 ```
 
+## 12. Upgrading from rc2
+
+For a throwaway kind cluster the simplest path is **reinstall**: run step 11, then
+steps 1–8 again. Your reports stay in Git.
+
+To upgrade in place, follow the
+[rc3 release notes](https://github.com/kagent-dev/kagent/releases/tag/v1.0.0-rc3#upgrading-from-v100-rc2).
+Re-running `kagent install` alone is **not** enough. The short version:
+
+1. Upgrade Substrate **before** kagent (Helm ≥ 3.17): create the `kagent-rustfs-credentials`
+   Secret in `ate-system` from the substrate release's `rustfs.accessKey`/`secretKey` →
+   `substrate-podcert` → adopt atelet into
+   a new `substrate-atelet` release (annotate its objects `helm.sh/resource-policy=keep` first,
+   or the next step deletes the DaemonSet) → worker image `ateworker-gvisor:v1.0.0` via the
+   rc2 kagent chart → `substrate-crds` and `substrate` 1.0.0 with `atelet.enabled=false`.
+2. Before the `substrate` upgrade in step 1, add `GoldenEgressPolicy` to Substrate's `preview` list. Without it, ate-api-server
+   rejects the golden egress policies that rc3 sets.
+3. Upgrade `kagent-crds` and `kagent` to `1.0.0-rc3`.
+4. Update the CLI (step 3) and the `kagent-linux-$ARCH` download URL in both CronJobs
+   (re-apply 7.3 and 8.3).
+
 ## References
 
-- kagent v1.0.0-rc2 release: https://github.com/kagent-dev/kagent/releases/tag/v1.0.0-rc2
-- Helm install / Substrate notes: https://github.com/kagent-dev/kagent/blob/v1.0.0-rc2/helm/README.md
-- Egress policies: https://github.com/kagent-dev/kagent/blob/v1.0.0-rc2/docs/architecture/egress-policies.md
-- A2A gateway (`/agents/{namespace}/{name}` on :8083): https://github.com/kagent-dev/kagent/blob/v1.0.0-rc2/docs/architecture/a2a-gateway.md
+- kagent v1.0.0-rc3 release: https://github.com/kagent-dev/kagent/releases/tag/v1.0.0-rc3
+- Substrate v1.0.0 (atelet chart values): https://github.com/kagent-dev/substrate/blob/v1.0.0/charts/substrate-atelet/README.md#values
+- Helm install / Substrate notes: https://github.com/kagent-dev/kagent/blob/v1.0.0-rc3/helm/README.md
+- Egress policies: https://github.com/kagent-dev/kagent/blob/v1.0.0-rc3/docs/architecture/egress-policies.md
+- A2A gateway (`/agents/{namespace}/{name}` on :8083): https://github.com/kagent-dev/kagent/blob/v1.0.0-rc3/docs/architecture/a2a-gateway.md
 - cloud-provider-kind: https://github.com/kubernetes-sigs/cloud-provider-kind
 - GitHub MCP server: https://github.com/github/github-mcp-server
 - NVD CVE API 2.0: https://nvd.nist.gov/developers/vulnerabilities
